@@ -71,8 +71,8 @@ def fetch_data(symbol, period):
 # --- 側邊欄 (設定區) ---
 with st.sidebar:
     st.header("⚙️ 設定參數")
-    # 更新標籤名稱：拿掉 ETF 並移除括號
-    ticker_input = st.text_input("輸入代號 例如：2330, 0056", value="0056")
+    # 更新標籤：拿掉範例文字
+    ticker_input = st.text_input("輸入代號", value="0056")
     
     period_options = {
         "3mo": "近 3 個月", "6mo": "近 6 個月", "ytd": "今年以來 (YTD)", 
