@@ -5,10 +5,10 @@ import plotly.graph_objects as go
 import numpy as np
 
 # --- 頁面設定 ---
-st.set_page_config(page_title="ETF vs 0050 績效分析", page_icon="📈", layout="wide")
+st.set_page_config(page_title="標的 vs 0050 績效分析", page_icon="📈", layout="wide")
 
-st.title("📈 ETF 相對績效分析系統")
-st.markdown("將您關注的台股 ETF 與台灣 50 (0050) 進行**還原報酬率**對決。")
+st.title("📈 相對績效分析系統")
+st.markdown("將您關注的台股標的與台灣 50 (0050) 進行**還原報酬率**對決。")
 
 # --- 初始化 Session State (用於自動千分位) ---
 if 'dca_amt_val' not in st.session_state:
@@ -71,8 +71,8 @@ def fetch_data(symbol, period):
 # --- 側邊欄 (設定區) ---
 with st.sidebar:
     st.header("⚙️ 設定參數")
-    # 更新標籤名稱與範例
-    ticker_input = st.text_input("輸入代號（例如：2330, 0056）", value="0056")
+    # 更新標籤名稱：拿掉 ETF 並移除括號
+    ticker_input = st.text_input("輸入代號 例如：2330, 0056", value="0056")
     
     period_options = {
         "3mo": "近 3 個月", "6mo": "近 6 個月", "ytd": "今年以來 (YTD)", 
@@ -88,7 +88,6 @@ with st.sidebar:
     invest_mode = st.radio("選擇模式", ["單筆投入 (Lump Sum)", "定期定額 (DCA)"], index=0)
     
     if invest_mode == "定期定額 (DCA)":
-        # 使用 Session State 達成自動千分位顯示
         st.text_input(
             "每期投入金額 (元)", 
             value=st.session_state.dca_amt_val, 
