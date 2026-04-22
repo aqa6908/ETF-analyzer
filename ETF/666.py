@@ -78,12 +78,24 @@ with st.sidebar:
     st.header("💰 投資模式")
     invest_mode = st.radio("選擇模式", ["單筆投入 (Lump Sum)", "定期定額 (DCA)"], index=0)
     
+    # 會計系專用：帶有逗號的金額解析邏輯
     if invest_mode == "定期定額 (DCA)":
-        amount_input = st.number_input("每期投入金額 (元)", value=3000, step=1000)
-        # 簡化扣款頻率為每月扣幾次
+        amount_str = st.text_input("每期投入金額 (元)", value="3,000")
+        try:
+            # 移除所有逗號並轉為整數
+            amount_input = int(amount_str.replace(",", ""))
+        except ValueError:
+            st.error("請輸入有效數字")
+            amount_input = 3000
+            
         dca_times_per_month = st.selectbox("每月扣款次數", options=[1, 2, 3, 4, 5, 6], index=0)
     else:
-        amount_input = st.number_input("初始投入金額 (元)", value=100000, step=10000)
+        amount_str = st.text_input("初始投入金額 (元)", value="100,000")
+        try:
+            amount_input = int(amount_str.replace(",", ""))
+        except ValueError:
+            st.error("請輸入有效數字")
+            amount_input = 100000
 
 # --- 主程式區塊 ---
 if ticker_input:
@@ -110,22 +122,15 @@ if ticker_input:
                 
                 # --- 計算投資績效 ---
                 if invest_mode == "單筆投入 (Lump Sum)":
-                    # 計算報酬率
                     df_merged['Return_Target'] = ((df_merged[col_t] / df_merged[col_t].iloc[0]) - 1) * 100
                     df_merged['Return_0050'] = ((df_merged[col_50] / df_merged[col_50].iloc[0]) - 1) * 100
-                    
-                    # 計算金額
                     final_val_t = amount_input * (1 + df_merged['Return_Target'].iloc[-1] / 100)
                     final_val_50 = amount_input * (1 + df_merged['Return_0050'].iloc[-1] / 100)
                     total_cost = amount_input
                     title_suffix = "單筆累積報酬率"
                 
                 else:
-                    # 定期定額計算
                     amt_per_time = amount_input
-                    
-                    # 使用 iloc 均分交易日達成每月 N 次扣款
-                    # 台灣股市每月約 20-22 個交易日
                     step = max(1, int(20 / dca_times_per_month))
                     invest_dates = df_merged.iloc[::step].index
                     
@@ -134,7 +139,6 @@ if ticker_input:
                         shares = np.where(is_invest, amt_per_time / df_merged[col], 0)
                         cum_shares = shares.cumsum()
                         total_value = cum_shares * df_merged[col]
-                        # 確保包含千分位格式的計算基礎
                         cum_cost_series = pd.Series(is_invest * amt_per_time, index=df_merged.index).cumsum()
                         cum_cost = cum_cost_series.replace(0, np.nan)
                         
@@ -151,7 +155,7 @@ if ticker_input:
 
                 df_merged['Alpha'] = df_merged['Return_Target'] - df_merged['Return_0050']
                 
-                # --- 數據總結顯示區 (會計系嚴選：含千分位逗號) ---
+                # --- 數據總結顯示區 ---
                 st.subheader("💰 實質績效結算")
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("總投入本金", f"${total_cost:,.0f}")
