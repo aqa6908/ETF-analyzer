@@ -10,6 +10,22 @@ st.set_page_config(page_title="ETF vs 0050 績效分析", page_icon="📈", layo
 st.title("📈 ETF 相對績效分析系統")
 st.markdown("將您關注的台股 ETF 與台灣 50 (0050) 進行**還原報酬率**對決。")
 
+# --- 初始化 Session State (用於自動千分位) ---
+if 'dca_amt_val' not in st.session_state:
+    st.session_state.dca_amt_val = "3,000"
+if 'lump_amt_val' not in st.session_state:
+    st.session_state.lump_amt_val = "100,000"
+
+def format_dca_amt():
+    raw = st.session_state.dca_input_key.replace(",", "")
+    if raw.isdigit():
+        st.session_state.dca_amt_val = f"{int(raw):,}"
+
+def format_lump_amt():
+    raw = st.session_state.lump_input_key.replace(",", "")
+    if raw.isdigit():
+        st.session_state.lump_amt_val = f"{int(raw):,}"
+
 # --- 資料抓取邏輯 (處理異常代號與資料斷層) ---
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_data(symbol, period):
@@ -22,31 +38,25 @@ def fetch_data(symbol, period):
         for i in range(len(prices)-1, 0, -1):
             if prices[i-1] > 0 and pd.notna(prices[i]) and pd.notna(prices[i-1]):
                 ratio = prices[i] / prices[i-1]
-                # 台股單日漲跌幅極限為 10%。若變動超過 25%，判定為未調整的分割/減資
                 if ratio < 0.75 or ratio > 1.25: 
                     prices[:i] = prices[:i] * ratio
         return pd.Series(prices, index=s.index, name=s.name)
 
-    # 1. 處理代號
     ticker_str = symbol.strip().upper()
     full_symbol = ticker_str if "." in ticker_str else f"{ticker_str}.TW"
     
     try:
         t = yf.Ticker(full_symbol)
-        # auto_adjust=False 才能明確抓到配息還原後的 Adj Close
         df = t.history(period=period, auto_adjust=False)
         
-        # 2. 如果 .TW 沒資料，嘗試上櫃 .TWO
         if df.empty and "." not in ticker_str:
             full_symbol = f"{ticker_str}.TWO"
             t = yf.Ticker(full_symbol)
             df = t.history(period=period, auto_adjust=False)
             
-        # 3. 如果還是沒資料，判定為代號輸入錯誤
         if df.empty:
             return None, full_symbol, "NotFound"
             
-        # 4. 資料前處理
         df.index = df.index.tz_localize(None)
         series = df['Adj Close'] if 'Adj Close' in df.columns else df['Close']
         series = clean_tw_stock_data(series)
@@ -54,7 +64,6 @@ def fetch_data(symbol, period):
         return pd.DataFrame(series), full_symbol, "Success"
 
     except Exception as e:
-        # 判定是否為被 Yahoo 封鎖 IP (429 錯誤)
         if "RateLimitError" in str(e) or "429" in str(e):
             return None, full_symbol, "RateLimit"
         return None, full_symbol, "Error"
@@ -62,7 +71,8 @@ def fetch_data(symbol, period):
 # --- 側邊欄 (設定區) ---
 with st.sidebar:
     st.header("⚙️ 設定參數")
-    ticker_input = st.text_input("輸入 ETF 代號 (例如: 0056, 00878)", value="0056")
+    # 更新標籤名稱與範例
+    ticker_input = st.text_input("輸入代號（例如：2330, 0056）", value="0056")
     
     period_options = {
         "3mo": "近 3 個月", "6mo": "近 6 個月", "ytd": "今年以來 (YTD)", 
@@ -74,40 +84,37 @@ with st.sidebar:
     
     st.divider()
     
-    # === 投資模式設定區 ===
     st.header("💰 投資模式")
     invest_mode = st.radio("選擇模式", ["單筆投入 (Lump Sum)", "定期定額 (DCA)"], index=0)
     
-    # 會計系專用：帶有逗號的金額解析邏輯
     if invest_mode == "定期定額 (DCA)":
-        amount_str = st.text_input("每期投入金額 (元)", value="3,000")
-        try:
-            # 移除所有逗號並轉為整數
-            amount_input = int(amount_str.replace(",", ""))
-        except ValueError:
-            st.error("請輸入有效數字")
-            amount_input = 3000
-            
+        # 使用 Session State 達成自動千分位顯示
+        st.text_input(
+            "每期投入金額 (元)", 
+            value=st.session_state.dca_amt_val, 
+            key="dca_input_key", 
+            on_change=format_dca_amt
+        )
+        amount_input = int(st.session_state.dca_amt_val.replace(",", ""))
         dca_times_per_month = st.selectbox("每月扣款次數", options=[1, 2, 3, 4, 5, 6], index=0)
     else:
-        amount_str = st.text_input("初始投入金額 (元)", value="100,000")
-        try:
-            amount_input = int(amount_str.replace(",", ""))
-        except ValueError:
-            st.error("請輸入有效數字")
-            amount_input = 100000
+        st.text_input(
+            "初始投入金額 (元)", 
+            value=st.session_state.lump_amt_val, 
+            key="lump_input_key", 
+            on_change=format_lump_amt
+        )
+        amount_input = int(st.session_state.lump_amt_val.replace(",", ""))
 
 # --- 主程式區塊 ---
 if ticker_input:
     ticker = ticker_input.strip().upper()
     with st.spinner(f"正在分析 {ticker}..."):
-        # 抓取資料
         df_target, target_symbol, status_target = fetch_data(ticker, period)
         df_0050, _, status_0050 = fetch_data("0050", period)
         
-        # 錯誤攔截
         if status_target == "NotFound":
-            st.error(f"❌ 無此代號：查稱 '{ticker}'。請確認輸入是否正確。")
+            st.error(f"❌ 無此代號：查無 '{ticker}'。請確認輸入是否正確。")
         elif status_target == "RateLimit" or status_0050 == "RateLimit":
             st.error("⚠️ 系統繁忙：Yahoo Finance 暫時限制了您的連線。請稍等後再試。")
         elif df_target is None or df_0050 is None:
@@ -120,7 +127,6 @@ if ticker_input:
             else:
                 col_t, col_50 = df_merged.columns[0], df_merged.columns[1]
                 
-                # --- 計算投資績效 ---
                 if invest_mode == "單筆投入 (Lump Sum)":
                     df_merged['Return_Target'] = ((df_merged[col_t] / df_merged[col_t].iloc[0]) - 1) * 100
                     df_merged['Return_0050'] = ((df_merged[col_50] / df_merged[col_50].iloc[0]) - 1) * 100
@@ -128,7 +134,6 @@ if ticker_input:
                     final_val_50 = amount_input * (1 + df_merged['Return_0050'].iloc[-1] / 100)
                     total_cost = amount_input
                     title_suffix = "單筆累積報酬率"
-                
                 else:
                     amt_per_time = amount_input
                     step = max(1, int(20 / dca_times_per_month))
