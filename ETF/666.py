@@ -78,11 +78,9 @@ with st.sidebar:
     st.header("💰 投資模式")
     invest_mode = st.radio("選擇模式", ["單筆投入 (Lump Sum)", "定期定額 (DCA)"], index=0)
     
-    # 預設單筆投入金額
-    default_lump_sum = 100000
-    
     if invest_mode == "定期定額 (DCA)":
-        amount_input = st.number_input("每月總預算 (元)", value=10000, step=1000)
+        # 改為每期投入金額，不再是每月總預算
+        amount_input = st.number_input("每期投入金額 (元)", value=3000, step=1000)
         dca_freq = st.selectbox("扣款頻率", [
             "每月 1 次 (月初)", 
             "每月 6 次 (高頻分散)", 
@@ -128,19 +126,17 @@ if ticker_input:
                     title_suffix = "單筆累積報酬率"
                 
                 else:
-                    # 定期定額計算
+                    # 定期定額計算 (每期固定投入 amount_input)
+                    amt_per_time = amount_input
+                    
                     if "每月 1 次" in dca_freq:
                         invest_dates = df_merged.groupby([df_merged.index.year, df_merged.index.month]).head(1).index
-                        amt_per_time = amount_input
                     elif "每月 6 次" in dca_freq:
                         invest_dates = df_merged.iloc[::int(20/6)].index 
-                        amt_per_time = amount_input / 6
                     elif "每週 1 次" in dca_freq:
                         invest_dates = df_merged.groupby([df_merged.index.isocalendar().year, df_merged.index.isocalendar().week]).head(1).index
-                        amt_per_time = amount_input / 4
-                    else:
+                    else: # 每日
                         invest_dates = df_merged.index
-                        amt_per_time = amount_input / 21
                     
                     for col, name in [(col_t, 'T'), (col_50, '50')]:
                         is_invest = df_merged.index.isin(invest_dates)
