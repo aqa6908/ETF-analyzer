@@ -79,14 +79,9 @@ with st.sidebar:
     invest_mode = st.radio("選擇模式", ["單筆投入 (Lump Sum)", "定期定額 (DCA)"], index=0)
     
     if invest_mode == "定期定額 (DCA)":
-        # 改為每期投入金額，不再是每月總預算
         amount_input = st.number_input("每期投入金額 (元)", value=3000, step=1000)
-        dca_freq = st.selectbox("扣款頻率", [
-            "每月 1 次 (月初)", 
-            "每月 6 次 (高頻分散)", 
-            "每週 1 次 (週一)", 
-            "每日扣款"
-        ], index=0)
+        # 簡化扣款頻率為每月扣幾次
+        dca_times_per_month = st.selectbox("每月扣款次數", options=[1, 2, 3, 4, 5, 6], index=0)
     else:
         amount_input = st.number_input("初始投入金額 (元)", value=100000, step=10000)
 
@@ -100,7 +95,7 @@ if ticker_input:
         
         # 錯誤攔截
         if status_target == "NotFound":
-            st.error(f"❌ 無此代號：查無 '{ticker}'。請確認輸入是否正確。")
+            st.error(f"❌ 無此代號：查稱 '{ticker}'。請確認輸入是否正確。")
         elif status_target == "RateLimit" or status_0050 == "RateLimit":
             st.error("⚠️ 系統繁忙：Yahoo Finance 暫時限制了您的連線。請稍等後再試。")
         elif df_target is None or df_0050 is None:
@@ -119,31 +114,30 @@ if ticker_input:
                     df_merged['Return_Target'] = ((df_merged[col_t] / df_merged[col_t].iloc[0]) - 1) * 100
                     df_merged['Return_0050'] = ((df_merged[col_50] / df_merged[col_50].iloc[0]) - 1) * 100
                     
-                    # 計算金額 (以輸入金額為準)
+                    # 計算金額
                     final_val_t = amount_input * (1 + df_merged['Return_Target'].iloc[-1] / 100)
                     final_val_50 = amount_input * (1 + df_merged['Return_0050'].iloc[-1] / 100)
                     total_cost = amount_input
                     title_suffix = "單筆累積報酬率"
                 
                 else:
-                    # 定期定額計算 (每期固定投入 amount_input)
+                    # 定期定額計算
                     amt_per_time = amount_input
                     
-                    if "每月 1 次" in dca_freq:
-                        invest_dates = df_merged.groupby([df_merged.index.year, df_merged.index.month]).head(1).index
-                    elif "每月 6 次" in dca_freq:
-                        invest_dates = df_merged.iloc[::int(20/6)].index 
-                    elif "每週 1 次" in dca_freq:
-                        invest_dates = df_merged.groupby([df_merged.index.isocalendar().year, df_merged.index.isocalendar().week]).head(1).index
-                    else: # 每日
-                        invest_dates = df_merged.index
+                    # 使用 iloc 均分交易日達成每月 N 次扣款
+                    # 台灣股市每月約 20-22 個交易日
+                    step = max(1, int(20 / dca_times_per_month))
+                    invest_dates = df_merged.iloc[::step].index
                     
                     for col, name in [(col_t, 'T'), (col_50, '50')]:
                         is_invest = df_merged.index.isin(invest_dates)
                         shares = np.where(is_invest, amt_per_time / df_merged[col], 0)
                         cum_shares = shares.cumsum()
                         total_value = cum_shares * df_merged[col]
-                        cum_cost = pd.Series(is_invest * amt_per_time, index=df_merged.index).cumsum().replace(0, np.nan)
+                        # 確保包含千分位格式的計算基礎
+                        cum_cost_series = pd.Series(is_invest * amt_per_time, index=df_merged.index).cumsum()
+                        cum_cost = cum_cost_series.replace(0, np.nan)
+                        
                         df_merged[f'Ret_{name}'] = ((total_value / cum_cost) - 1) * 100
                         df_merged[f'Val_{name}'] = total_value
                         df_merged['Final_Cost'] = cum_cost
@@ -157,7 +151,7 @@ if ticker_input:
 
                 df_merged['Alpha'] = df_merged['Return_Target'] - df_merged['Return_0050']
                 
-                # --- 數據總結顯示區 ---
+                # --- 數據總結顯示區 (會計系嚴選：含千分位逗號) ---
                 st.subheader("💰 實質績效結算")
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("總投入本金", f"${total_cost:,.0f}")
