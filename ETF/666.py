@@ -74,18 +74,23 @@ with st.sidebar:
     
     st.divider()
     
-    # === 定期定額設定區 ===
+    # === 投資模式設定區 ===
     st.header("💰 投資模式")
     invest_mode = st.radio("選擇模式", ["單筆投入 (Lump Sum)", "定期定額 (DCA)"], index=0)
     
+    # 預設單筆投入金額
+    default_lump_sum = 100000
+    
     if invest_mode == "定期定額 (DCA)":
-        dca_amount = st.number_input("每月總預算 (元)", value=10000, step=1000)
+        amount_input = st.number_input("每月總預算 (元)", value=10000, step=1000)
         dca_freq = st.selectbox("扣款頻率", [
             "每月 1 次 (月初)", 
             "每月 6 次 (高頻分散)", 
             "每週 1 次 (週一)", 
             "每日扣款"
         ], index=0)
+    else:
+        amount_input = st.number_input("初始投入金額 (元)", value=100000, step=10000)
 
 # --- 主程式區塊 ---
 if ticker_input:
@@ -95,114 +100,101 @@ if ticker_input:
         df_target, target_symbol, status_target = fetch_data(ticker, period)
         df_0050, _, status_0050 = fetch_data("0050", period)
         
-        # 1. 錯誤攔截：無此代號
+        # 錯誤攔截
         if status_target == "NotFound":
-            st.error(f"❌ 無此代號：查無 '{ticker}'。請確認輸入是否正確（台股不需加 .TW，如 0056）。")
-        # 2. 錯誤攔截：IP 被封鎖
+            st.error(f"❌ 無此代號：查無 '{ticker}'。請確認輸入是否正確。")
         elif status_target == "RateLimit" or status_0050 == "RateLimit":
-            st.error("⚠️ 系統繁忙：Yahoo Finance 暫時限制了您的連線。請稍等 1 分鐘後再重新整理網頁。")
-        # 3. 錯誤攔截：其他連線問題
+            st.error("⚠️ 系統繁忙：Yahoo Finance 暫時限制了您的連線。請稍等後再試。")
         elif df_target is None or df_0050 is None:
-            st.error("❌ 讀取失敗：無法從公開資料源取得數據，請稍後再試。")
+            st.error("❌ 讀取失敗：無法取得數據。")
         else:
-            # 正常計算邏輯
             df_merged = df_target.join(df_0050, how='inner')
             
             if df_merged.empty:
-                st.warning("⚠️ 查無重疊交易日：該標的在選擇的區間內可能尚未上市。")
+                st.warning("⚠️ 查無重疊交易日。")
             else:
                 col_t, col_50 = df_merged.columns[0], df_merged.columns[1]
                 
-                # --- A. 單筆投入計算 ---
+                # --- 計算投資績效 ---
                 if invest_mode == "單筆投入 (Lump Sum)":
+                    # 計算報酬率
                     df_merged['Return_Target'] = ((df_merged[col_t] / df_merged[col_t].iloc[0]) - 1) * 100
                     df_merged['Return_0050'] = ((df_merged[col_50] / df_merged[col_50].iloc[0]) - 1) * 100
-                    title_suffix = "累積報酬率"
+                    
+                    # 計算金額 (以輸入金額為準)
+                    final_val_t = amount_input * (1 + df_merged['Return_Target'].iloc[-1] / 100)
+                    final_val_50 = amount_input * (1 + df_merged['Return_0050'].iloc[-1] / 100)
+                    total_cost = amount_input
+                    title_suffix = "單筆累積報酬率"
                 
-                # --- B. 定期定額計算 ---
                 else:
-                    # 決定扣款日索引
+                    # 定期定額計算
                     if "每月 1 次" in dca_freq:
                         invest_dates = df_merged.groupby([df_merged.index.year, df_merged.index.month]).head(1).index
-                        amt_per_time = dca_amount
+                        amt_per_time = amount_input
                     elif "每月 6 次" in dca_freq:
                         invest_dates = df_merged.iloc[::int(20/6)].index 
-                        amt_per_time = dca_amount / 6
+                        amt_per_time = amount_input / 6
                     elif "每週 1 次" in dca_freq:
                         invest_dates = df_merged.groupby([df_merged.index.isocalendar().year, df_merged.index.isocalendar().week]).head(1).index
-                        amt_per_time = dca_amount / 4
-                    else: # 每日
+                        amt_per_time = amount_input / 4
+                    else:
                         invest_dates = df_merged.index
-                        amt_per_time = dca_amount / 21 # 平均每月 21 交易日
+                        amt_per_time = amount_input / 21
                     
-                    # 計算雙方資產成長
                     for col, name in [(col_t, 'T'), (col_50, '50')]:
                         is_invest = df_merged.index.isin(invest_dates)
-                        # 計算累積股數
                         shares = np.where(is_invest, amt_per_time / df_merged[col], 0)
                         cum_shares = shares.cumsum()
                         total_value = cum_shares * df_merged[col]
-                        # 修正點：確保將 NumPy 計算結果轉回 Pandas Series 再呼叫 .replace()
                         cum_cost = pd.Series(is_invest * amt_per_time, index=df_merged.index).cumsum().replace(0, np.nan)
                         df_merged[f'Ret_{name}'] = ((total_value / cum_cost) - 1) * 100
+                        df_merged[f'Val_{name}'] = total_value
+                        df_merged['Final_Cost'] = cum_cost
                     
                     df_merged['Return_Target'] = df_merged['Ret_T']
                     df_merged['Return_0050'] = df_merged['Ret_50']
+                    final_val_t = df_merged['Val_T'].iloc[-1]
+                    final_val_50 = df_merged['Val_50'].iloc[-1]
+                    total_cost = df_merged['Final_Cost'].iloc[-1]
                     title_suffix = "定期定額資產報酬率"
 
                 df_merged['Alpha'] = df_merged['Return_Target'] - df_merged['Return_0050']
                 
-                # --- 視覺化前處理 (Resample) ---
+                # --- 數據總結顯示區 ---
+                st.subheader("💰 實質績效結算")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("總投入本金", f"${total_cost:,.0f}")
+                m2.metric(f"{target_symbol} 最終價值", f"${final_val_t:,.0f}", f"{df_merged['Return_Target'].iloc[-1]:.2f}%")
+                m3.metric("0050 最終價值", f"${final_val_50:,.0f}", f"{df_merged['Return_0050'].iloc[-1]:.2f}%")
+                
+                profit_diff = final_val_t - final_val_50
+                diff_color = "normal" if profit_diff >= 0 else "inverse"
+                m4.metric("相對損益差額", f"${profit_diff:,.0f}", f"{df_merged['Alpha'].iloc[-1]:.2f}%", delta_color=diff_color)
+
+                # --- 繪圖區 ---
                 if "月報" in interval_choice:
                     df_plot = df_merged.resample('ME').last()
-                    x_fmt, show_m, b_gap = "%Y-%m", True, 0.2
+                    x_fmt, show_m = "%Y-%m", True
                 elif "週報" in interval_choice:
                     df_plot = df_merged.resample('W-FRI').last()
-                    x_fmt, show_m, b_gap = "%Y-%m-%d", True, 0.1
+                    x_fmt, show_m = "%Y-%m-%d", True
                 else:
                     df_plot = df_merged.copy()
-                    x_fmt, show_m, b_gap = "%Y-%m-%d", False, 0.1
+                    x_fmt, show_m = "%Y-%m-%d", False
                 
                 df_plot.dropna(inplace=True)
                 
-                # --- 繪圖區 ---
+                st.divider()
                 st.subheader(f"📊 {target_symbol} vs 0050 {title_suffix}")
-                st.caption("💡 互動提示：在圖表上**按住拖曳**可放大局部，**點擊兩下**恢復全圖。")
                 
-                # 主圖
                 fig_main = go.Figure()
-                fig_main.add_trace(go.Scatter(
-                    x=df_plot.index, y=df_plot['Return_Target'], name=target_symbol,
-                    mode='lines+markers' if show_m else 'lines',
-                    line=dict(color='#F54346', width=2.5), fill='tozeroy', fillcolor='rgba(245, 67, 70, 0.1)'
-                ))
-                fig_main.add_trace(go.Scatter(
-                    x=df_plot.index, y=df_plot['Return_0050'], name='0050',
-                    mode='lines+markers' if show_m else 'lines',
-                    line=dict(color='#8E8E93', width=2)
-                ))
-                fig_main.update_layout(
-                    hovermode='x unified', plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                    margin=dict(l=0, r=0, t=30, b=0), height=400,
-                    xaxis=dict(showgrid=False, tickformat="%Y-%m"),
-                    yaxis=dict(ticksuffix="%", gridcolor='#E5E5EA'),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="left", x=0)
-                )
+                fig_main.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Return_Target'], name=target_symbol, mode='lines', line=dict(color='#F54346', width=2.5), fill='tozeroy', fillcolor='rgba(245, 67, 70, 0.1)'))
+                fig_main.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Return_0050'], name='0050', line=dict(color='#8E8E93', width=2)))
+                fig_main.update_layout(hovermode='x unified', plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', margin=dict(l=0, r=0, t=30, b=0), height=400, legend=dict(orientation="h", y=1.1))
                 st.plotly_chart(fig_main, use_container_width=True, config={'displayModeBar': False})
                 
-                st.divider()
-                
-                # 副圖
                 st.subheader("⚖️ 打敗大盤幅度 (超額報酬)")
-                colors = ['#F54346' if v >= 0 else '#34C759' for v in df_plot['Alpha']]
-                fig_sub = go.Figure(go.Bar(
-                    x=df_plot.index, y=df_plot['Alpha'], marker_color=colors,
-                    hovertemplate=f'%{{x|{x_fmt}}}<br>幅度: %{{y:.2f}}%<extra></extra>'
-                ))
-                fig_sub.update_layout(
-                    hovermode='x unified', plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                    margin=dict(l=0, r=0, t=10, b=0), height=300,
-                    xaxis=dict(showgrid=False, tickformat="%Y-%m"),
-                    yaxis=dict(ticksuffix="%", gridcolor='#E5E5EA', zeroline=True, zerolinecolor='#8E8E93')
-                )
+                fig_sub = go.Figure(go.Bar(x=df_plot.index, y=df_plot['Alpha'], marker_color=['#F54346' if v >= 0 else '#34C759' for v in df_plot['Alpha']]))
+                fig_sub.update_layout(hovermode='x unified', plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=300, margin=dict(l=0,r=0,t=10,b=0))
                 st.plotly_chart(fig_sub, use_container_width=True, config={'displayModeBar': False})
