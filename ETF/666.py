@@ -138,10 +138,12 @@ if ticker_input:
                     # 計算雙方資產成長
                     for col, name in [(col_t, 'T'), (col_50, '50')]:
                         is_invest = df_merged.index.isin(invest_dates)
+                        # 計算累積股數
                         shares = np.where(is_invest, amt_per_time / df_merged[col], 0)
                         cum_shares = shares.cumsum()
                         total_value = cum_shares * df_merged[col]
-                        cum_cost = (is_invest * amt_per_time).cumsum().replace(0, np.nan)
+                        # 修正點：確保將 NumPy 計算結果轉回 Pandas Series 再呼叫 .replace()
+                        cum_cost = pd.Series(is_invest * amt_per_time, index=df_merged.index).cumsum().replace(0, np.nan)
                         df_merged[f'Ret_{name}'] = ((total_value / cum_cost) - 1) * 100
                     
                     df_merged['Return_Target'] = df_merged['Ret_T']
