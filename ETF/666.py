@@ -71,7 +71,6 @@ def fetch_data(symbol, period):
 # --- 側邊欄 (設定區) ---
 with st.sidebar:
     st.header("⚙️ 設定參數")
-    # 更新標籤：拿掉範例文字
     ticker_input = st.text_input("輸入代號", value="0056")
     
     period_options = {
@@ -189,10 +188,29 @@ if ticker_input:
                 fig_main = go.Figure()
                 fig_main.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Return_Target'], name=target_symbol, mode='lines', line=dict(color='#F54346', width=2.5), fill='tozeroy', fillcolor='rgba(245, 67, 70, 0.1)'))
                 fig_main.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Return_0050'], name='0050', line=dict(color='#8E8E93', width=2)))
-                fig_main.update_layout(hovermode='x unified', plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', margin=dict(l=0, r=0, t=30, b=0), height=400, legend=dict(orientation="h", y=1.1))
+                fig_main.update_layout(
+                    hovermode='x unified', 
+                    plot_bgcolor='rgba(0,0,0,0)', 
+                    paper_bgcolor='rgba(0,0,0,0)', 
+                    margin=dict(l=0, r=0, t=30, b=0), 
+                    height=400, 
+                    legend=dict(orientation="h", y=1.1),
+                    dragmode=False, # 禁用拖曳縮放，解決手機操作困擾
+                    xaxis=dict(fixedrange=True), # 鎖定 X 軸縮放
+                    yaxis=dict(fixedrange=True)  # 鎖定 Y 軸縮放
+                )
                 st.plotly_chart(fig_main, use_container_width=True, config={'displayModeBar': False})
                 
                 st.subheader("⚖️ 打敗大盤幅度 (超額報酬)")
                 fig_sub = go.Figure(go.Bar(x=df_plot.index, y=df_plot['Alpha'], marker_color=['#F54346' if v >= 0 else '#34C759' for v in df_plot['Alpha']]))
-                fig_sub.update_layout(hovermode='x unified', plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', height=300, margin=dict(l=0,r=0,t=10,b=0))
+                fig_sub.update_layout(
+                    hovermode='x unified', 
+                    plot_bgcolor='rgba(0,0,0,0)', 
+                    paper_bgcolor='rgba(0,0,0,0)', 
+                    height=300, 
+                    margin=dict(l=0,r=0,t=10,b=0),
+                    dragmode=False, # 禁用拖曳縮放
+                    xaxis=dict(fixedrange=True),
+                    yaxis=dict(fixedrange=True)
+                )
                 st.plotly_chart(fig_sub, use_container_width=True, config={'displayModeBar': False})
